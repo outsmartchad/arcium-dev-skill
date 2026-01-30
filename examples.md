@@ -2,7 +2,7 @@
 
 ## Example Projects
 
-Located at `/root/examples/`:
+From the [Arcium examples repository](https://github.com/arcium-hq/examples):
 
 | Example | Pattern | Complexity |
 |---------|---------|------------|
