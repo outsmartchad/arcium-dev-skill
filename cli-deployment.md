@@ -6,12 +6,75 @@
 
 The `arcium` CLI wraps Anchor and adds MPC-specific steps (circuit compilation, MXE init, ARX node management).
 
-## Docker Container Setup
+## Docker Development Environment
 
-All arcium commands run inside a Docker container with the Arcium toolchain:
+All arcium commands run inside a Docker container with the full Arcium toolchain.
+
+### Sample Dockerfile
+
+```dockerfile
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# System dependencies + Docker CLI (for arcium test MPC cluster)
+RUN rm -rf /var/lib/apt/lists/* \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        curl build-essential libssl-dev pkg-config libudev-dev \
+        git ca-certificates unzip gnupg docker.io docker-compose-v2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node.js 20.x (required for Arcium)
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && npm install -g yarn \
+    && rm -rf /var/lib/apt/lists/*
+
+# Rust 1.89.0 (match your rust-toolchain.toml)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    && . "$HOME/.cargo/env" \
+    && rustup default 1.89.0 \
+    && rustup component add rustfmt clippy
+
+# Solana CLI 2.3.0 (required by Arcium 0.6.3)
+RUN sh -c "$(curl -sSfL https://release.anza.xyz/v2.3.0/install)" \
+    && . "$HOME/.bashrc"
+
+ENV PATH="/root/.cargo/bin:/root/.local/share/solana/install/active_release/bin:${PATH}"
+
+# Generate default Solana keypair
+RUN solana-keygen new --no-bip39-passphrase --silent || true
+
+# Anchor 0.32.1 via AVM
+RUN cargo install --git https://github.com/coral-xyz/anchor avm --force \
+    && avm install 0.32.1 \
+    && avm use 0.32.1
+
+# Arcium CLI 0.6.3 (direct binary download)
+RUN curl "https://bin.arcium.com/download/arcium_x86_64_linux_0.6.3" -o /root/.cargo/bin/arcium \
+    && chmod +x /root/.cargo/bin/arcium \
+    && curl "https://bin.arcium.com/download/arcup_x86_64_linux_0.6.3" -o /root/.cargo/bin/arcup \
+    && chmod +x /root/.cargo/bin/arcup
+
+# Clean cargo cache to avoid version conflicts
+RUN rm -rf /root/.cargo/registry/cache /root/.cargo/registry/src /root/.cargo/registry/index
+
+# Verify
+RUN rustc --version && cargo --version && solana --version \
+    && anchor --version && arcium --version && node --version && yarn --version
+
+WORKDIR /app
+SHELL ["/bin/bash", "-c"]
+```
+
+### Running the Container
 
 ```bash
-# Start container
+# Build image
+docker build -t your-arcium-dev .
+
+# Start container (mount project + Solana keys + Docker socket for MPC nodes)
 docker run -d \
     --name your-dev \
     --ulimit nofile=1048576:1048576 \
@@ -21,12 +84,17 @@ docker run -d \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -p 8899:8899 \
     -p 8900:8900 \
-    your-image \
+    your-arcium-dev \
     sleep infinity
 
 # All commands via docker exec
 docker exec your-dev bash -c "cd /app && arcium build"
 ```
+
+**Key mounts:**
+- `$(pwd):/app` — project source
+- `$HOME/.config/solana:/root/.config/solana` — wallet keypair
+- `/var/run/docker.sock` — required for `arcium test` to spin up ARX MPC nodes
 
 ## Commands
 
